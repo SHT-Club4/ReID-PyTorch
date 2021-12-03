@@ -29,8 +29,6 @@ def parse_args():
     parser.add_argument('--lr', type=float, default=0.05)
     parser.add_argument('--weight_decay', type=float, default=5e-4)
     
-
-    
     args = parser.parse_args()
     return args
 
@@ -97,6 +95,7 @@ if __name__ == "__main__":
         print('Epoch:'+ str(epoch + 1) + '/' + str(epochs))
         print('Total Loss: %.3f || Val Loss: %.3f ' % (train_loss / train_step, val_loss / val_step))
         # 保存模型
-        torch.save(model.state_dict(), 'checkpoint/ep%03d-loss%.3f-val_loss%.3f.pth' % (epoch + 1, train_loss / train_step, val_loss / val_step))
+        if epoch % 10 == 0:
+            torch.save(model.state_dict(), 'checkpoint/ep%03d-loss%.3f-val_loss%.3f.pth' % (epoch + 1, train_loss / train_step, val_loss / val_step))
 
     print('ALL DONE!')

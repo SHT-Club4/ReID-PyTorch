@@ -1,5 +1,6 @@
 import torch
 from torch.nn import init
+import numpy as np
 import random
 import math
 import os
@@ -186,3 +187,98 @@ class LossHistory():
 
         plt.cla()
         plt.close("all")
+
+
+def fliplr(image):
+    inv_idx = torch.arange(image.size(3) - 1, -1, -1).long()
+    img_flip = image.index_select(3, inv_idx)
+    return img_flip
+
+
+def extract_feature(model, dataloader):
+    features = torch.FloatTensor()
+
+    for data in dataloader:
+        image, label = data
+        image_f = fliplr(image)
+
+        input_image = Variable(image).cuda()
+        input_image_f = Variable(image_f).cuda()
+
+        outputs = model(input_image) + model(input_image_f)
+        # 计算每个特征的二范数
+        feature_norm = torch.norm(outputs, p=2, dim=1, keepdim=True)
+        feature = outputs.div(feature_norm.expand_as(outputs))
+
+        features = torch.cat((features, feature.data.cpu()), 0)
+    
+    return features
+
+
+def get_id(img_path):
+    camera_id = []
+    labels = []
+    for path, _ in img_path:
+        filename = os.path.basename(path)
+        # 获取标签（分类id）
+        label = filename[0:4]
+        if label[0:2] == '-1':
+            labels.append(-1)
+        else:
+            labels.append(int(label))
+        # 获取camera的id
+        camera = filename.split('c')[1]
+        camera_id.append(int(camera[0]))
+    
+    return camera_id, labels
+
+
+def evaluate(qf, ql, qc, gf, gl, gc):
+    query = qf.view(-1, 1)
+    score = torch.mm(gf, query)
+    score = score.squeeze(1).cpu()
+    score = score.numpy()
+
+    index = np.argsort(score)
+    index = index[::-1]
+
+    query_index = np.argwhere(gl == ql)
+    camera_index = np.argwhere(gc == qc)
+
+    good_index = np.setdiff1d(query_index, camera_index, assume_unique=True)
+    junk_index1 = np.argwhere(gl==-1)
+    junk_index2 = np.intersect1d(query_index, camera_index)
+    junk_index = np.append(junk_index2, junk_index1) #.flatten())
+    
+    CMC_tmp = compute_mAP(index, good_index, junk_index)
+    return CMC_tmp
+
+
+def compute_mAP(index, good_index, junk_index):
+    ap = 0
+    cmc = torch.IntTensor(len(index)).zero_()
+    if good_index.size==0:   # if empty
+        cmc[0] = -1
+        return ap,cmc
+
+    # remove junk_index
+    mask = np.in1d(index, junk_index, invert=True)
+    index = index[mask]
+
+    # find good_index index
+    ngood = len(good_index)
+    mask = np.in1d(index, good_index)
+    rows_good = np.argwhere(mask==True)
+    rows_good = rows_good.flatten()
+    
+    cmc[rows_good[0]:] = 1
+    for i in range(ngood):
+        d_recall = 1.0/ngood
+        precision = (i+1)*1.0/(rows_good[i]+1)
+        if rows_good[i]!=0:
+            old_precision = i*1.0/rows_good[i]
+        else:
+            old_precision=1.0
+        ap = ap + d_recall*(old_precision + precision)/2
+
+    return ap, cmc
